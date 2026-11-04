@@ -374,6 +374,14 @@ local function write_lua_totals(session)
 		if index > 60 then break end
 		line("  %10.2f %9d %9.2f  %s", to_ms(row.stats.self_ticks), row.stats.calls, to_ms(row.stats.worst_ticks), row.key)
 	end
+	local setup_caller, setup_share = queries.main_caller(session, "(lua state setup)")
+	if setup_caller then
+		line(
+			"(lua state setup) is new Lua states and the game's dofile and dofile_once, mostly started by %s (%.0f%%)",
+			setup_caller,
+			setup_share * 100
+		)
+	end
 	line("")
 	line("compile (luaL_loadbufferx): ms total | calls | worst call ms | file, and what mostly started it")
 	for index, row in ipairs(sorted_by(session.compile_stats, "total_ticks")) do

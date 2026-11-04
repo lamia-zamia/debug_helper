@@ -96,7 +96,8 @@ local function script_label(session, path, line)
 	if not label then
 		local category, key = "scripts", path
 		if path:find("^@?mods/debug_helper/") then category = "own" end
-		if path:find("^__loaded=") then
+		-- The game's own dofile and dofile_once, whose source is their code. They load files, mostly for new states.
+		if path:find("^__load%a*=") then
 			key = LUA_STATE_SETUP
 		elseif line > 0 then
 			key = path .. ":" .. line
@@ -120,6 +121,32 @@ local function compile_label(session, path)
 	return key
 end
 
+---Remembers what started a compile, a new Lua state or a game file load: the outermost frame below the update or draw
+---@param session profiler_session
+---@param stack profiler_call_stack
+---@param key string
+---@param depth integer frames still on the stack, below the one that ended
+---@param ticks number
+local function add_caller(session, stack, key, depth, ticks)
+	local caller = "the engine, outside any system or script"
+	for level = 1, depth do
+		local hook_id = stack.hook_ids[level]
+		if hook_id == ID_PCALL or hook_id == ID_FUNCTION then
+			caller = script_label(session, stack.paths[level], stack.lines[level]).key
+			break
+		elseif hook_id >= ID_FIRST_SYSTEM then
+			caller = session.hook_names[hook_id] or "?"
+			break
+		end
+	end
+	local callers = session.callers_by_item[key]
+	if not callers then
+		callers = {}
+		session.callers_by_item[key] = callers
+	end
+	callers[caller] = (callers[caller] or 0) + ticks
+end
+
 ---Closes the Lua function on top of the stack
 ---@param session profiler_session
 ---@param stack profiler_call_stack
@@ -131,6 +158,7 @@ local function pop_function(session, stack, frame, timestamp)
 	local label = script_label(session, stack.paths[depth], stack.lines[depth])
 	add_call_stat(session.script_stats, label.key, total_ticks - stack.child_ticks[depth], total_ticks)
 	credit(session, frame, label.category, label.key, total_ticks - stack.child_ticks[depth], total_ticks)
+	if label.key == LUA_STATE_SETUP then add_caller(session, stack, label.key, depth - 1, total_ticks) end
 	stack.depth = depth - 1
 	if depth > 1 then stack.child_ticks[depth - 1] = stack.child_ticks[depth - 1] + total_ticks end
 end
@@ -177,32 +205,6 @@ end
 local function on_function_exit(session, stack, frame, event, timestamp)
 	pop_functions_from(session, stack, frame, timestamp, event.stack_slot + 1)
 	if stack.depth > 0 and stack.hook_ids[stack.depth] == ID_FUNCTION then pop_function(session, stack, frame, timestamp) end
-end
-
----Remembers what started a compile or a new Lua state: the outermost frame below the update or draw
----@param session profiler_session
----@param stack profiler_call_stack
----@param key string
----@param depth integer frames still on the stack, below the one that ended
----@param ticks number
-local function add_caller(session, stack, key, depth, ticks)
-	local caller = "the engine, outside any system or script"
-	for level = 1, depth do
-		local hook_id = stack.hook_ids[level]
-		if hook_id == ID_PCALL or hook_id == ID_FUNCTION then
-			caller = script_label(session, stack.paths[level], stack.lines[level]).key
-			break
-		elseif hook_id >= ID_FIRST_SYSTEM then
-			caller = session.hook_names[hook_id] or "?"
-			break
-		end
-	end
-	local callers = session.callers_by_item[key]
-	if not callers then
-		callers = {}
-		session.callers_by_item[key] = callers
-	end
-	callers[caller] = (callers[caller] or 0) + ticks
 end
 
 ---Opens a hooked call on the stack

@@ -226,7 +226,7 @@ end
 local function hook_slice_name(session, hook_id, event)
 	if hook_id == HOOK_ID.PCALL then
 		local name = ffi.string(event.path)
-		if name:find("^__loaded=") then return "(lua state setup)" end
+		if name:find("^__load%a*=") then return "(lua state setup)" end
 		return event.line > 0 and name .. ":" .. event.line or name
 	elseif hook_id == HOOK_ID.LOAD then
 		return "compile: " .. ffi.string(event.path)
