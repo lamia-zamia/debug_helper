@@ -116,35 +116,32 @@ local function merge_bucket(into, bucket)
 	merge_entity_samples(into, bucket)
 end
 
----Copy of the whole session's totals, which later frames leave alone
----@param session profiler_session
+---A copy of a bucket, which later frames leave alone
+---@param bucket profiler_bucket
 ---@return profiler_bucket
-function queries.snapshot_lifetime(session)
-	local copy = sessions.new_bucket(1)
-	merge_bucket(copy, session.lifetime_bucket)
-	copy.last_frame = session.lifetime_bucket.last_frame
+function queries.copy_bucket(bucket)
+	local copy = sessions.new_bucket(bucket.first_frame)
+	merge_bucket(copy, bucket)
+	copy.last_frame = bucket.last_frame
 	return copy
 end
 
 ---Everything recorded over a stretch of frames: one timeline behind every table
----@param session profiler_session
----@param span_frames integer? frames ending at newest_frame, nil for the whole session
----@param newest_frame integer
+---@param history profiler_session|profiler_frozen_view
+---@param span_frames integer? frames ending at the newest one, nil for the whole session
 ---@return profiler_bucket
-function queries.span_totals(session, span_frames, newest_frame)
-	if not span_frames then return session.lifetime_bucket end
-	local oldest_frame = newest_frame - span_frames + 1
+function queries.span_totals(history, span_frames)
+	if not span_frames then return history.lifetime_bucket end
+	local oldest_frame = history.frame_count - span_frames + 1
 	local merged = sessions.new_bucket(oldest_frame)
-	---Merges a bucket that falls inside the span
+	---Merges a bucket that falls inside the span, whole blocks only
 	---@param bucket profiler_bucket
 	local function merge_if_inside(bucket)
-		-- Whole blocks only, and none running past newest_frame: a frozen view never shows later frames.
-		if bucket.frame_count == 0 or bucket.last_frame > newest_frame or bucket.last_frame < oldest_frame then return end
-		merge_bucket(merged, bucket)
+		if bucket.frame_count > 0 and bucket.last_frame >= oldest_frame then merge_bucket(merged, bucket) end
 	end
-	merge_if_inside(session.open_bucket)
-	for index = 1, math.min(session.closed_bucket_count, sessions.BUCKET_COUNT) do
-		merge_if_inside(session.closed_buckets[index])
+	merge_if_inside(history.open_bucket)
+	for index = 1, math.min(history.closed_bucket_count, sessions.BUCKET_COUNT) do
+		merge_if_inside(history.closed_buckets[index])
 	end
 	return merged
 end

@@ -48,7 +48,7 @@ end
 local function draw_controls(session)
 	local imgui = view.imgui
 	local _
-	if imgui.Button(view.frozen_frame and "Resume" or "Freeze") then view:toggle_freeze(session) end
+	if imgui.Button(view.frozen and "Resume" or "Freeze") then view:toggle_freeze(session) end
 	imgui.SameLine()
 	if imgui.Button("Span: " .. view.SPANS[view.span_index].label) then view.span_index = view.span_index % #view.SPANS + 1 end
 	imgui.SameLine()
@@ -86,7 +86,7 @@ local function draw_header(session)
 			entity_count,
 			memory_mb,
 			usage.totals.spike_count,
-			view.frozen_frame and "  |  FROZEN, hover the graph to inspect" or ""
+			view.frozen and "  |  FROZEN, hover the graph to inspect" or ""
 		)
 	)
 end

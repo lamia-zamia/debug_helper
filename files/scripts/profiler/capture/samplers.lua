@@ -4,12 +4,12 @@ local hook_block = dofile_once("mods/debug_helper/files/scripts/profiler/native/
 local sessions = dofile_once("mods/debug_helper/files/scripts/profiler/capture/session.lua") ---@type profiler_sessions_module
 local SAMPLE_COUNT = hook_block.SAMPLE_COUNT
 local CELL_COUNTER_COUNT = hook_block.CELL_COUNTER_COUNT
+local TWO_TO_31 = 2147483648
 local TWO_TO_32 = 4294967296
 local NO_ENTITY_ID = 0xFFFFFFFF
 local ENTITY_FILE_CACHE_LIMIT = 20000
 local CELL_SCAN_EVERY_TICKS = 30
 local THREAD_QUERY_LIMITED_INFORMATION = 0x0800
-local STILL_ACTIVE = 259
 local WORKING_SET_INDEX = 3
 local PROCESS_COUNTERS_DWORDS = 10
 
@@ -17,8 +17,6 @@ local PROCESS_COUNTERS_DWORDS = 10
 local samplers = {}
 
 samplers.SAMPLE_EVERY_TICKS = 60
--- Has to land on a sampling tick, the only ticks sample_threads runs on.
-local THREAD_LIST_EVERY_TICKS = samplers.SAMPLE_EVERY_TICKS * 10
 samplers.NO_ENTITY = "(system-wide work, no single entity)"
 samplers.GONE_ENTITY = "(removed before it could be read)"
 samplers.RUNTIME_ENTITY = "(created at runtime)"
@@ -153,7 +151,17 @@ local function scan_for_new_cell_slots(session)
 	end
 end
 
----Folds the cell table into the current frame. Counters wrap at 32 bits, hence only differences get used
+---How far a cell counter moved since the last read. Counters wrap at 32 bits, and worker threads update them without
+---a lock, so a late write can step one back a little. That is no movement, not a wrap of 4 billion
+---@param now integer
+---@param before integer
+---@return integer
+local function counter_moved(now, before)
+	local moved = (now - before) % TWO_TO_32
+	return moved < TWO_TO_31 and moved or 0
+end
+
+---Folds the cell table into the current frame
 ---@param session profiler_session
 function samplers.read_cell_counters(session)
 	if session.tick_count % CELL_SCAN_EVERY_TICKS == 1 then scan_for_new_cell_slots(session) end
@@ -162,13 +170,12 @@ function samplers.read_cell_counters(session)
 	for _, slot in ipairs(session.active_cell_slots) do
 		local counter = cells[slot]
 		local baseline = session.cell_baselines[slot]
-		local count = counter.count
-		local new_cells = (count - baseline.count) % TWO_TO_32
+		local count, counted_ticks, samples = counter.count, counter.ticks, counter.samples
+		local new_cells = counter_moved(count, baseline.count)
 		if new_cells > 0 then
-			local new_samples = (counter.samples - baseline.samples) % TWO_TO_32
-			local new_ticks = (counter.ticks - baseline.ticks) % TWO_TO_32
-			if new_samples > 0 then baseline.ticks_per_sample = new_ticks / new_samples end
-			baseline.count, baseline.ticks, baseline.samples = count, counter.ticks, counter.samples
+			local new_samples = counter_moved(samples, baseline.samples)
+			if new_samples > 0 then baseline.ticks_per_sample = counter_moved(counted_ticks, baseline.ticks) / new_samples end
+			baseline.count, baseline.ticks, baseline.samples = count, counted_ticks, samples
 			local name = material_name(session, counter.material)
 			local ticks = baseline.ticks_per_sample * new_cells
 			frame.material_ticks[name] = (frame.material_ticks[name] or 0) + ticks
@@ -179,50 +186,40 @@ function samplers.read_cell_counters(session)
 	end
 end
 
----Opens handles for this process's threads and closes those of threads that ended
----@param session profiler_session
-local function list_threads(session)
-	local process = ffi.C.GetCurrentProcess()
-	local next_handle = ffi.new("void*[1]")
-	local exit_code = ffi.new("uint32_t[1]")
-	local alive = {}
-	local handle, keep_handle = nil, true
-	while win32.ntdll.NtGetNextThread(process, handle, THREAD_QUERY_LIMITED_INFORMATION, 0, 0, next_handle) == 0 do
-		if not keep_handle then ffi.C.CloseHandle(handle) end
-		handle = next_handle[0]
-		local thread_id = ffi.C.GetThreadId(handle)
-		-- An ended thread stays listed for as long as any handle to it is open, ours included.
-		local is_running = ffi.C.GetExitCodeThread(handle, exit_code) ~= 0 and exit_code[0] == STILL_ACTIVE
-		if is_running then alive[thread_id] = true end
-		keep_handle = is_running and session.cpu_threads[thread_id] == nil
-		if keep_handle then session.cpu_threads[thread_id] = { handle = handle, percent = 0 } end
-	end
-	if not keep_handle then ffi.C.CloseHandle(handle) end
-	for thread_id, thread in pairs(session.cpu_threads) do
-		if not alive[thread_id] then
-			ffi.C.CloseHandle(thread.handle)
-			session.cpu_threads[thread_id] = nil
-		end
-	end
+---A thread's CPU use since its last sample. One that ended stays listed while the game holds a handle to it, at 0%
+---@param previous profiler_cpu_thread?
+---@param cpu_seconds number
+---@param elapsed_seconds number?
+---@return profiler_cpu_thread
+local function thread_usage(previous, cpu_seconds, elapsed_seconds)
+	local percent = 0
+	if previous and elapsed_seconds and elapsed_seconds > 0 then percent = 100 * (cpu_seconds - previous.cpu_seconds) / elapsed_seconds end
+	return { cpu_seconds = cpu_seconds, percent = percent }
 end
 
----CPU used by each thread since the last call, as a percentage of one core
+---CPU used by each thread since the last call, as a percentage of one core. Keeps no thread handle past this call:
+---a Lua state can go at any time, and nothing would close what it held
 ---@param session profiler_session
 function samplers.sample_threads(session)
-	if not session.cpu_sample_wall_clock or session.tick_count % THREAD_LIST_EVERY_TICKS == 0 then list_threads(session) end
 	local wall_clock = hook_block.read_wall_clock()
 	local elapsed_seconds = session.cpu_sample_wall_clock and (wall_clock - session.cpu_sample_wall_clock) / session.wall_clock_frequency or nil
 	session.cpu_sample_wall_clock = wall_clock
+	local process = ffi.C.GetCurrentProcess()
+	local next_handle = ffi.new("void*[1]")
 	local created, exited, kernel, user = ffi.new("uint64_t[1]"), ffi.new("uint64_t[1]"), ffi.new("uint64_t[1]"), ffi.new("uint64_t[1]")
-	for _, thread in pairs(session.cpu_threads) do
-		if ffi.C.GetThreadTimes(thread.handle, created, exited, kernel, user) ~= 0 then
+	local threads = {}
+	local handle = nil
+	while win32.ntdll.NtGetNextThread(process, handle, THREAD_QUERY_LIMITED_INFORMATION, 0, 0, next_handle) == 0 do
+		if handle then ffi.C.CloseHandle(handle) end
+		handle = next_handle[0]
+		if ffi.C.GetThreadTimes(handle, created, exited, kernel, user) ~= 0 then
+			local thread_id = ffi.C.GetThreadId(handle)
 			local cpu_seconds = (tonumber(kernel[0] + user[0]) or 0) / 1e7 -- 100 ns units
-			if thread.cpu_seconds and elapsed_seconds and elapsed_seconds > 0 then
-				thread.percent = 100 * (cpu_seconds - thread.cpu_seconds) / elapsed_seconds
-			end
-			thread.cpu_seconds = cpu_seconds
+			threads[thread_id] = thread_usage(session.cpu_threads[thread_id], cpu_seconds, elapsed_seconds)
 		end
 	end
+	if handle then ffi.C.CloseHandle(handle) end
+	session.cpu_threads = threads
 end
 
 return samplers

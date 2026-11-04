@@ -63,7 +63,7 @@ local function build_spike_rows(session, in_view)
 		trace_files[slot.frame_number] = slot.file
 	end
 	local rows = {}
-	for _, spike in ipairs(session.spikes) do
+	for _, spike in ipairs(view:spikes(session)) do
 		if in_view(spike) then
 			rows[#rows + 1] = {
 				(view:end_timestamp(session) - spike.frame.end_timestamp) / session.ticks_per_ms / 1000,
@@ -110,13 +110,12 @@ end
 function detail_tabs.draw_spikes(session, height)
 	local imgui = view.imgui
 	local span = view.SPANS[view.span_index]
-	local newest = view:newest_frame(session)
-	local oldest = span.all and 0 or newest - span.frames_per_column * view.GRAPH_COLUMNS + 1
+	local oldest = span.all and 0 or view:newest_frame(session) - span.frames_per_column * view.GRAPH_COLUMNS + 1
 	---Whether a spike falls inside the span
 	---@param spike profiler_spike
 	---@return boolean
 	local function in_view(spike)
-		return spike.frame_number >= oldest and spike.frame_number <= newest
+		return spike.frame_number >= oldest
 	end
 	local rows = view:cached_rows("spikes", session, 30, function()
 		return build_spike_rows(session, in_view)
@@ -127,11 +126,11 @@ function detail_tabs.draw_spikes(session, height)
 			totals.spike_count,
 			view:span_label(),
 			totals.stretch_count,
-			(view.frozen_totals or session.lifetime_bucket).spike_count
+			view:session_spike_count(session)
 		)
 	)
 	local selected = nil
-	for _, spike in ipairs(session.spikes) do
+	for _, spike in ipairs(view:spikes(session)) do
 		if spike.frame_number == view.selected_spike_frame and in_view(spike) then selected = spike end
 	end
 	local table_height = selected and height * 0.45 or height - 22

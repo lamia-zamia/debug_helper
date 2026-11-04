@@ -16,7 +16,6 @@ int K32GetProcessMemoryInfo(void* process, uint32_t* counters, uint32_t size);
 void* GetCurrentProcess(void);
 int NtGetNextThread(void* process, void* thread, uint32_t access, uint32_t attributes, uint32_t flags, void** next);
 uint32_t GetThreadId(void* thread);
-int GetExitCodeThread(void* thread, uint32_t* code);
 int GetThreadTimes(void* thread, uint64_t* created, uint64_t* exited, uint64_t* kernel, uint64_t* user);
 int CloseHandle(void* handle);
 uint32_t GetEnvironmentVariableA(const char* name, char* out, uint32_t size);

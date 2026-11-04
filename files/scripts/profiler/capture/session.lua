@@ -140,8 +140,7 @@ local hook_block = dofile_once("mods/debug_helper/files/scripts/profiler/native/
 ---@field ticks_per_sample number
 
 ---@class profiler_cpu_thread
----@field handle ffi.cdata*
----@field cpu_seconds number?
+---@field cpu_seconds number
 ---@field percent number
 
 ---@class profiler_session

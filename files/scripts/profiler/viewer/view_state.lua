@@ -26,15 +26,25 @@ local OVERLAY_SETTING = "debug_helper.profiler_hud"
 ---@field busy_ms number
 ---@field own_ms number
 
+---What the view reads from a session, as it was at the freeze, because the session goes on underneath it
+---@class profiler_frozen_view
+---@field frame_count integer
+---@field last_frame_end number
+---@field entity_count integer
+---@field memory_mb number
+---@field spikes profiler_spike[]
+---@field lifetime_bucket profiler_bucket
+---@field open_bucket profiler_bucket
+---@field closed_buckets profiler_bucket[]
+---@field closed_bucket_count integer
+
 ---@class profiler_view_state
 ---@field imgui ImGui only read after viewer.draw has checked that it loaded
 ---@field span_index integer
 ---@field y_scale_index integer
 ---@field window_opacity number
 ---@field overlay_alpha number
----@field frozen_frame integer?
----@field frozen_totals profiler_bucket? the session's totals at the freeze, for the All span
----@field frozen_end_timestamp number?
+---@field frozen profiler_frozen_view?
 ---@field selected_spike_frame integer?
 ---@field tab_to_open string?
 ---@field item_filter string?
@@ -101,7 +111,7 @@ end
 ---@param build fun(): Rows
 ---@return Rows
 function view:cached_rows(name, session, every_ticks, build)
-	if not self.cached[name] or (not self.frozen_frame and session.tick_count - (self.refreshed_at[name] or -1e9) >= every_ticks) then
+	if not self.cached[name] or (not self.frozen and session.tick_count - (self.refreshed_at[name] or -1e9) >= every_ticks) then
 		self.cached[name] = build()
 		self.refreshed_at[name] = session.tick_count
 	end
@@ -110,7 +120,7 @@ end
 
 ---Drops cached tables when the span or freeze changes, or they would show a different stretch of frames
 function view:sync()
-	local key = self.span_index .. ":" .. tostring(self.frozen_frame) .. ":" .. tostring(self.item_filter)
+	local key = self.span_index .. ":" .. tostring(self.frozen and self.frozen.frame_count) .. ":" .. tostring(self.item_filter)
 	if key ~= self.view_key then
 		self.view_key = key
 		self.cached = {}
@@ -118,23 +128,31 @@ function view:sync()
 	end
 end
 
----Stops the view at the current frame, or lets it go again
+---Stops the view at the current frame, or lets it go again. Closed buckets never change, so they can be shared
 ---@param session profiler_session
 function view:toggle_freeze(session)
-	if self.frozen_frame then
-		self.frozen_frame, self.frozen_totals, self.frozen_end_timestamp = nil, nil, nil
+	if self.frozen then
+		self.frozen = nil
 		return
 	end
-	self.frozen_frame = session.frame_count
-	self.frozen_totals = queries.snapshot_lifetime(session)
-	self.frozen_end_timestamp = session.last_frame_end
+	self.frozen = {
+		frame_count = session.frame_count,
+		last_frame_end = session.last_frame_end,
+		entity_count = session.entity_count,
+		memory_mb = session.memory_mb,
+		spikes = { unpack(session.spikes) },
+		lifetime_bucket = queries.copy_bucket(session.lifetime_bucket),
+		open_bucket = queries.copy_bucket(session.open_bucket),
+		closed_buckets = { unpack(session.closed_buckets) },
+		closed_bucket_count = session.closed_bucket_count,
+	}
 end
 
 ---When the view's newest frame ended, for "ago" times
 ---@param session profiler_session
 ---@return number
 function view:end_timestamp(session)
-	return self.frozen_end_timestamp or session.last_frame_end
+	return (self.frozen or session).last_frame_end
 end
 
 ---The entity count and memory use at the view's newest frame
@@ -142,16 +160,29 @@ end
 ---@return integer entity_count
 ---@return number memory_mb
 function view:game_stats(session)
-	local frame = self.frozen_frame and sessions.frame_at(session, self.frozen_frame)
-	if frame then return frame.entity_count, frame.memory_mb end
-	return session.entity_count, session.memory_mb
+	local source = self.frozen or session
+	return source.entity_count, source.memory_mb
+end
+
+---The spikes the view shows, worst first
+---@param session profiler_session
+---@return profiler_spike[]
+function view:spikes(session)
+	return (self.frozen or session).spikes
+end
+
+---Spikes in the whole session, up to the freeze
+---@param session profiler_session
+---@return integer
+function view:session_spike_count(session)
+	return (self.frozen or session).lifetime_bucket.spike_count
 end
 
 ---The frame the view ends at
 ---@param session profiler_session
 ---@return integer
 function view:newest_frame(session)
-	return self.frozen_frame or session.frame_count
+	return (self.frozen or session).frame_count
 end
 
 ---The selected Span, ending at the frozen frame or the newest one. Every table reads this
@@ -159,8 +190,7 @@ end
 ---@return profiler_bucket
 function view:selected_totals(session)
 	local span = self.SPANS[self.span_index]
-	if span.all and self.frozen_totals then return self.frozen_totals end
-	return queries.span_totals(session, not span.all and span.frames_per_column * self.GRAPH_COLUMNS or nil, self:newest_frame(session))
+	return queries.span_totals(self.frozen or session, not span.all and span.frames_per_column * self.GRAPH_COLUMNS or nil)
 end
 
 ---The selected Span in words
@@ -168,7 +198,7 @@ end
 function view:span_label()
 	local span = self.SPANS[self.span_index]
 	local label = span.all and "whole session" or ("last " .. span.label)
-	return self.frozen_frame and (label .. " up to the freeze") or label
+	return self.frozen and (label .. " up to the freeze") or label
 end
 
 ---Which mod, or which part of the engine, a breakdown item belongs to
@@ -252,10 +282,9 @@ end
 ---@param session profiler_session
 ---@return profiler_spike?
 function view.latest_spike(session)
-	local newest = view:newest_frame(session)
 	local latest = nil
-	for _, spike in ipairs(session.spikes) do
-		if spike.frame_number <= newest and (not latest or spike.frame_number > latest.frame_number) then latest = spike end
+	for _, spike in ipairs(view:spikes(session)) do
+		if not latest or spike.frame_number > latest.frame_number then latest = spike end
 	end
 	return latest
 end
