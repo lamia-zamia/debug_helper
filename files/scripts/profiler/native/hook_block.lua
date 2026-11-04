@@ -11,7 +11,7 @@ typedef struct {
 } profiler_event;
 typedef struct { uint32_t entity, system; } profiler_sample;
 typedef struct { uint32_t material, count, ticks, samples; } profiler_cell_counter;
-typedef struct { uint32_t slot, original, stub, id; char name[48]; } profiler_hook_entry;
+typedef struct { uint32_t slot, original, stub, id, in_chain; char name[44]; } profiler_hook_entry;
 typedef struct {
 	uint32_t magic, event_write, hook_count, cell_hooks_installed, read_timestamp_stub;
 	uint32_t lua_type, lua_pushvalue, lua_getinfo;
@@ -39,7 +39,7 @@ typedef struct {
 ---@field system integer hook id of the system that was running
 
 ---@class profiler_cell_counter
----@field material integer CellData pointer
+---@field material integer CellData pointer, set once when the material claims the slot
 ---@field count integer
 ---@field ticks integer
 ---@field samples integer calls timed so far
@@ -49,7 +49,8 @@ typedef struct {
 ---@field original integer
 ---@field stub integer
 ---@field id integer
----@field name ffi.cdata* char[48]
+---@field in_chain integer non-zero from patching the slot until the stub comes back out of it
+---@field name ffi.cdata* char[44]
 
 ---@class profiler_control_block
 ---@field magic integer
@@ -89,7 +90,7 @@ typedef struct {
 ---@class profiler_hook_block_module
 local hook_block = {}
 
-hook_block.MAGIC = 0x50524F46
+hook_block.MAGIC = 0x50524F47
 hook_block.LITERALS_OFFSET = 0x100 -- ">S\0" at +0, "?\0" at +4
 hook_block.HOOKS_OFFSET = 0x1000
 hook_block.HOOK_ENTRY_SIZE = 64
@@ -136,14 +137,6 @@ end
 ---@return Struct[]
 function hook_block.array_at(struct_name, address)
 	return ffi.cast(struct_name .. "*", address)
-end
-
----Allocates one zeroed C struct
----@generic Struct
----@param struct_name `Struct`
----@return Struct
-function hook_block.new_struct(struct_name)
-	return ffi.new(struct_name)
 end
 
 ---Allocates a zeroed array of C structs, indexed from 0

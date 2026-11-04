@@ -456,6 +456,14 @@ function assembler:lock_xadd(memory, source)
 	self:emit_modrm(source.code, memory)
 end
 
+---lock cmpxchg [memory], register
+---@param memory x86_operand
+---@param source x86_operand
+function assembler:lock_cmpxchg(memory, source)
+	self:emit(0xF0, 0x0F, 0xB1)
+	self:emit_modrm(source.code, memory)
+end
+
 ---rdtsc
 function assembler:rdtsc()
 	self:emit(0x0F, 0x31)

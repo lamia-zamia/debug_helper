@@ -1,4 +1,5 @@
 local ffi = require("ffi")
+local win32 = dofile_once("mods/debug_helper/files/scripts/shared/win32.lua") ---@type win32_module
 local hook_block = dofile_once("mods/debug_helper/files/scripts/profiler/native/hook_block.lua") ---@type profiler_hook_block_module
 local sessions = dofile_once("mods/debug_helper/files/scripts/profiler/capture/session.lua") ---@type profiler_sessions_module
 local SAMPLE_COUNT = hook_block.SAMPLE_COUNT
@@ -7,9 +8,8 @@ local TWO_TO_32 = 4294967296
 local NO_ENTITY_ID = 0xFFFFFFFF
 local ENTITY_FILE_CACHE_LIMIT = 20000
 local CELL_SCAN_EVERY_TICKS = 30
-local TH32CS_SNAPTHREAD = 4
-local THREAD_ENTRY_SIZE = 28
 local THREAD_QUERY_LIMITED_INFORMATION = 0x0800
+local STILL_ACTIVE = 259
 local WORKING_SET_INDEX = 3
 local PROCESS_COUNTERS_DWORDS = 10
 
@@ -17,7 +17,7 @@ local PROCESS_COUNTERS_DWORDS = 10
 local samplers = {}
 
 samplers.SAMPLE_EVERY_TICKS = 60
--- A thread snapshot walks the whole system. Has to land on a sampling tick, the only ticks sample_threads runs on.
+-- Has to land on a sampling tick, the only ticks sample_threads runs on.
 local THREAD_LIST_EVERY_TICKS = samplers.SAMPLE_EVERY_TICKS * 10
 samplers.NO_ENTITY = "(system-wide work, no single entity)"
 samplers.GONE_ENTITY = "(removed before it could be read)"
@@ -63,9 +63,10 @@ end
 ---@param session profiler_session
 function samplers.read_entity_samples(session)
 	local write_position = session.block.control.sample_write
-	if write_position - session.sample_cursor > SAMPLE_COUNT then
-		session.samples_lost = session.samples_lost + (write_position - session.sample_cursor - SAMPLE_COUNT)
-		session.sample_cursor = write_position - SAMPLE_COUNT
+	local unread = (write_position - session.sample_cursor) % TWO_TO_32
+	if unread > SAMPLE_COUNT then
+		session.samples_lost = session.samples_lost + (unread - SAMPLE_COUNT)
+		session.sample_cursor = (write_position - SAMPLE_COUNT) % TWO_TO_32
 	end
 	local samples = session.block.samples
 	local sample_index = session.sample_cursor
@@ -136,9 +137,17 @@ end
 ---@param session profiler_session
 local function scan_for_new_cell_slots(session)
 	local cells = session.block.cells
+	-- Counters outlive a Lua state, so what the first scan finds is not this session's. Later finds are all new.
+	local is_first_scan = session.tick_count == 1
 	for slot = 0, CELL_COUNTER_COUNT - 1 do
-		if cells[slot].count ~= 0 and not session.cell_baselines[slot] then
-			session.cell_baselines[slot] = { count = 0, ticks = 0, samples = 0, ticks_per_sample = 0 }
+		local counter = cells[slot]
+		if counter.count ~= 0 and not session.cell_baselines[slot] then
+			local baseline = { count = 0, ticks = 0, samples = 0, ticks_per_sample = 0 }
+			if is_first_scan then
+				baseline.count, baseline.ticks, baseline.samples = counter.count, counter.ticks, counter.samples
+				if counter.samples > 0 then baseline.ticks_per_sample = counter.ticks / counter.samples end
+			end
+			session.cell_baselines[slot] = baseline
 			session.active_cell_slots[#session.active_cell_slots + 1] = slot
 		end
 	end
@@ -173,25 +182,22 @@ end
 ---Opens handles for this process's threads and closes those of threads that ended
 ---@param session profiler_session
 local function list_threads(session)
-	local snapshot = ffi.C.CreateToolhelp32Snapshot(TH32CS_SNAPTHREAD, 0)
-	if snapshot == nil or snapshot == ffi.cast("void*", -1) then return end
-	local entry = hook_block.new_struct("win32_thread_entry")
-	entry.size = THREAD_ENTRY_SIZE
+	local process = ffi.C.GetCurrentProcess()
+	local next_handle = ffi.new("void*[1]")
+	local exit_code = ffi.new("uint32_t[1]")
 	local alive = {}
-	local process_id = ffi.C.GetCurrentProcessId()
-	local more = ffi.C.Thread32First(snapshot, entry)
-	while more ~= 0 do
-		if entry.owner_process == process_id then
-			local thread_id = entry.thread_id
-			alive[thread_id] = true
-			if not session.cpu_threads[thread_id] then
-				local handle = ffi.C.OpenThread(THREAD_QUERY_LIMITED_INFORMATION, 0, thread_id)
-				if handle ~= nil then session.cpu_threads[thread_id] = { handle = handle, percent = 0 } end
-			end
-		end
-		more = ffi.C.Thread32Next(snapshot, entry)
+	local handle, keep_handle = nil, true
+	while win32.ntdll.NtGetNextThread(process, handle, THREAD_QUERY_LIMITED_INFORMATION, 0, 0, next_handle) == 0 do
+		if not keep_handle then ffi.C.CloseHandle(handle) end
+		handle = next_handle[0]
+		local thread_id = ffi.C.GetThreadId(handle)
+		-- An ended thread stays listed for as long as any handle to it is open, ours included.
+		local is_running = ffi.C.GetExitCodeThread(handle, exit_code) ~= 0 and exit_code[0] == STILL_ACTIVE
+		if is_running then alive[thread_id] = true end
+		keep_handle = is_running and session.cpu_threads[thread_id] == nil
+		if keep_handle then session.cpu_threads[thread_id] = { handle = handle, percent = 0 } end
 	end
-	ffi.C.CloseHandle(snapshot)
+	if not keep_handle then ffi.C.CloseHandle(handle) end
 	for thread_id, thread in pairs(session.cpu_threads) do
 		if not alive[thread_id] then
 			ffi.C.CloseHandle(thread.handle)

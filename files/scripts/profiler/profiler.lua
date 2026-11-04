@@ -90,8 +90,9 @@ function profiler.tick()
 	step_census(running)
 	sessions.add_own_cost(running, "component census", read_timestamp() - after_export)
 	if running.tick_count % REPORT_EVERY_TICKS == 0 and running.ticks_per_ms > 0 then
+		local before_report = read_timestamp()
 		report.write(running)
-		sessions.add_own_cost(running, "text report", read_timestamp() - after_export)
+		sessions.add_own_cost(running, "text report", read_timestamp() - before_report)
 	end
 	local spent = read_timestamp() - started
 	running.own_ticks_total = running.own_ticks_total + spent

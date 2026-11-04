@@ -349,9 +349,10 @@ end
 function event_reader.read_events(session)
 	local block = session.block
 	local write_position = block.control.event_write
-	if write_position - session.event_cursor > EVENT_COUNT then
-		session.events_dropped = session.events_dropped + (write_position - session.event_cursor - EVENT_COUNT)
-		session.event_cursor = write_position - EVENT_COUNT
+	local unread = (write_position - session.event_cursor) % TWO_TO_32
+	if unread > EVENT_COUNT then
+		session.events_dropped = session.events_dropped + (unread - EVENT_COUNT)
+		session.event_cursor = (write_position - EVENT_COUNT) % TWO_TO_32
 		for _, stack in pairs(session.stacks_by_thread) do
 			stack.depth = 0
 		end

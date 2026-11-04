@@ -64,6 +64,7 @@ local function draw_body(session, width, height)
 	draw_plot(session, height - text_height - graph_height, width, graph_height)
 
 	local y = height - text_height
+	local entity_count, memory_mb = view:game_stats(session)
 	outlined_text(
 		TEXT_MARGIN,
 		y,
@@ -71,8 +72,8 @@ local function draw_body(session, width, height)
 			view:span_label(),
 			usage.busy_ms,
 			usage.own_ms,
-			session.entity_count,
-			session.memory_mb,
+			entity_count,
+			memory_mb,
 			usage.totals.spike_count
 		)
 	)

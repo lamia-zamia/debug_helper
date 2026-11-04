@@ -12,6 +12,8 @@ local CURRENT_THREAD_ID = x86.fs_at(0x24)
 local CELL_HASH_FACTOR = 0x9E3779B1
 local CELL_HASH_SHIFT = 20 -- leaves 12 bits: CELL_COUNTER_COUNT is 4096
 local CELL_TIMING_MASK = 63 -- times 1 call in 64
+local CELL_COUNTER_SIZE = 2 ^ hook_block.CELL_COUNTER_SHIFT
+local CELL_COUNTERS_MASK = (hook_block.CELL_COUNTER_COUNT - 1) * CELL_COUNTER_SIZE
 local MAX_PATH_CHARS = 99
 local LUA_HOOKCALL, LUA_HOOKRET = 0, 1
 local LUA_MASKCALL_AND_RET = 3
@@ -263,18 +265,48 @@ local function push_stack_slot(asm, slot, count)
 	end
 end
 
----Runs for every simulated cell, so it stays small: always counts, times 1 call in 64
+---Taken when a material is not in its hashed slot: its first sighting, or two materials sharing a hash. Walks to its
+---own slot, claiming the first empty one, so each material keeps its own numbers. A full table shares the first slot
+---@param asm x86_assembler
+---@param cells number
+local function emit_cell_slot_search(asm, cells)
+	asm:label("find_slot")
+	asm:push(ebx)
+	asm:push(esi)
+	asm:mov(ebx, eax)
+	asm:mov(esi, hook_block.CELL_COUNTER_COUNT)
+	asm:label("next_slot")
+	asm:xor(eax, eax)
+	asm:lock_cmpxchg(at(ebx, cells + cell_offset("material")), edx) -- worker threads race for the same empty slot
+	asm:je("found")
+	asm:cmp(eax, edx)
+	asm:je("found")
+	asm:add(ebx, CELL_COUNTER_SIZE)
+	asm:and_(ebx, CELL_COUNTERS_MASK)
+	asm:dec(esi)
+	asm:jne("next_slot")
+	asm:label("found")
+	asm:mov(eax, ebx)
+	asm:pop(esi)
+	asm:pop(ebx)
+	asm:jmp("count")
+end
+
+---Runs for every simulated cell, so the usual path stays small: always counts, times 1 call in 64
 ---@param context profiler_stub_context
 ---@param hook profiler_planned_hook
 ---@param original x86_operand
 local function emit_cell_hook(context, hook, original)
 	local asm = context.asm
+	local cells = context.block_address + hook_block.CELLS_OFFSET
 	asm:mov(edx, at(ecx, hook.material_offset))
 	asm:imul(eax, edx, CELL_HASH_FACTOR)
 	asm:shr(eax, CELL_HASH_SHIFT)
 	asm:shl(eax, hook_block.CELL_COUNTER_SHIFT)
-	asm:add(eax, context.block_address + hook_block.CELLS_OFFSET)
-	asm:mov(at(eax, cell_offset("material")), edx)
+	asm:cmp(at(eax, cells + cell_offset("material")), edx)
+	asm:jne("find_slot")
+	asm:label("count")
+	asm:add(eax, cells)
 	asm:inc(at(eax, cell_offset("count")))
 	asm:test(byte_at(eax, cell_offset("count")), CELL_TIMING_MASK)
 	asm:je("timed")
@@ -296,6 +328,7 @@ local function emit_cell_hook(context, hook, original)
 	asm:pop(edi)
 	asm:pop(esi)
 	asm:ret(0x10)
+	emit_cell_slot_search(asm, cells)
 end
 
 ---Pushes what lua_type and lua_pushvalue take for the function under the arguments of lua_pcall(L, nargs, ...).

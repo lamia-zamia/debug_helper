@@ -48,7 +48,7 @@ end
 local function draw_controls(session)
 	local imgui = view.imgui
 	local _
-	if imgui.Button(view.frozen_frame and "Resume" or "Freeze") then view.frozen_frame = not view.frozen_frame and session.frame_count or nil end
+	if imgui.Button(view.frozen_frame and "Resume" or "Freeze") then view:toggle_freeze(session) end
 	imgui.SameLine()
 	if imgui.Button("Span: " .. view.SPANS[view.span_index].label) then view.span_index = view.span_index % #view.SPANS + 1 end
 	imgui.SameLine()
@@ -77,13 +77,14 @@ end
 ---@param session profiler_session
 local function draw_header(session)
 	local usage = view:usage(session)
+	local entity_count, memory_mb = view:game_stats(session)
 	view.imgui.Text(
 		("%s: real work %.1f ms of the 16.7 ms budget (%.1f is this profiler)  |  %d entities  |  %.0f MB  |  %d hitches%s"):format(
 			view:span_label(),
 			usage.busy_ms,
 			usage.own_ms,
-			session.entity_count,
-			session.memory_mb,
+			entity_count,
+			memory_mb,
 			usage.totals.spike_count,
 			view.frozen_frame and "  |  FROZEN, hover the graph to inspect" or ""
 		)

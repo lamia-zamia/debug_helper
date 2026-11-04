@@ -66,7 +66,7 @@ local function build_spike_rows(session, in_view)
 	for _, spike in ipairs(session.spikes) do
 		if in_view(spike) then
 			rows[#rows + 1] = {
-				(session.last_frame_end - spike.frame.end_timestamp) / session.ticks_per_ms / 1000,
+				(view:end_timestamp(session) - spike.frame.end_timestamp) / session.ticks_per_ms / 1000,
 				spike.frame.busy_ticks / session.ticks_per_ms,
 				spike.frame.lua_pcalls,
 				spike.frame.entities_spawned,
@@ -127,7 +127,7 @@ function detail_tabs.draw_spikes(session, height)
 			totals.spike_count,
 			view:span_label(),
 			totals.stretch_count,
-			session.spike_count
+			(view.frozen_totals or session.lifetime_bucket).spike_count
 		)
 	)
 	local selected = nil

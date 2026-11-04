@@ -33,6 +33,8 @@ local OVERLAY_SETTING = "debug_helper.profiler_hud"
 ---@field window_opacity number
 ---@field overlay_alpha number
 ---@field frozen_frame integer?
+---@field frozen_totals profiler_bucket? the session's totals at the freeze, for the All span
+---@field frozen_end_timestamp number?
 ---@field selected_spike_frame integer?
 ---@field tab_to_open string?
 ---@field item_filter string?
@@ -116,6 +118,35 @@ function view:sync()
 	end
 end
 
+---Stops the view at the current frame, or lets it go again
+---@param session profiler_session
+function view:toggle_freeze(session)
+	if self.frozen_frame then
+		self.frozen_frame, self.frozen_totals, self.frozen_end_timestamp = nil, nil, nil
+		return
+	end
+	self.frozen_frame = session.frame_count
+	self.frozen_totals = queries.snapshot_lifetime(session)
+	self.frozen_end_timestamp = session.last_frame_end
+end
+
+---When the view's newest frame ended, for "ago" times
+---@param session profiler_session
+---@return number
+function view:end_timestamp(session)
+	return self.frozen_end_timestamp or session.last_frame_end
+end
+
+---The entity count and memory use at the view's newest frame
+---@param session profiler_session
+---@return integer entity_count
+---@return number memory_mb
+function view:game_stats(session)
+	local frame = self.frozen_frame and sessions.frame_at(session, self.frozen_frame)
+	if frame then return frame.entity_count, frame.memory_mb end
+	return session.entity_count, session.memory_mb
+end
+
 ---The frame the view ends at
 ---@param session profiler_session
 ---@return integer
@@ -128,6 +159,7 @@ end
 ---@return profiler_bucket
 function view:selected_totals(session)
 	local span = self.SPANS[self.span_index]
+	if span.all and self.frozen_totals then return self.frozen_totals end
 	return queries.span_totals(session, not span.all and span.frames_per_column * self.GRAPH_COLUMNS or nil, self:newest_frame(session))
 end
 
@@ -220,9 +252,10 @@ end
 ---@param session profiler_session
 ---@return profiler_spike?
 function view.latest_spike(session)
+	local newest = view:newest_frame(session)
 	local latest = nil
 	for _, spike in ipairs(session.spikes) do
-		if not latest or spike.frame_number > latest.frame_number then latest = spike end
+		if spike.frame_number <= newest and (not latest or spike.frame_number > latest.frame_number) then latest = spike end
 	end
 	return latest
 end
@@ -233,7 +266,7 @@ end
 ---@return string
 function view.last_hitch_text(session, spike)
 	return ("Last hitch %.0fs ago, %.0f ms: %s"):format(
-		(session.last_frame_end - spike.frame.end_timestamp) / session.ticks_per_ms / 1000,
+		(view:end_timestamp(session) - spike.frame.end_timestamp) / session.ticks_per_ms / 1000,
 		spike.frame.busy_ticks / session.ticks_per_ms,
 		view.spike_cause(spike, session.ticks_per_ms)
 	)

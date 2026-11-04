@@ -116,6 +116,16 @@ local function merge_bucket(into, bucket)
 	merge_entity_samples(into, bucket)
 end
 
+---Copy of the whole session's totals, which later frames leave alone
+---@param session profiler_session
+---@return profiler_bucket
+function queries.snapshot_lifetime(session)
+	local copy = sessions.new_bucket(1)
+	merge_bucket(copy, session.lifetime_bucket)
+	copy.last_frame = session.lifetime_bucket.last_frame
+	return copy
+end
+
 ---Everything recorded over a stretch of frames: one timeline behind every table
 ---@param session profiler_session
 ---@param span_frames integer? frames ending at newest_frame, nil for the whole session

@@ -41,16 +41,29 @@ local function write_slot(slot, value)
 	return true
 end
 
+---Points a slot at its stub. A stub still in the slot's chain stays there: whatever went on top may call it, and
+---installing above that would make the two call each other forever
+---@param hook profiler_hook_entry
+local function enable_hook(hook)
+	local current = ffi.cast("uint32_t*", hook.slot)[0]
+	if current == hook.stub then return end
+	if hook.in_chain ~= 0 then
+		log("another mod hooked over it, staying under it: " .. ffi.string(hook.name))
+		return
+	end
+	hook.original = current
+	if write_slot(hook.slot, hook.stub) then
+		hook.in_chain = 1
+	else
+		log("VirtualProtect failed for " .. ffi.string(hook.name))
+	end
+end
+
 ---Points every slot at its stub
 ---@param block profiler_hook_block
 local function enable_hooks(block)
 	for index = 0, block.control.hook_count - 1 do
-		local hook = block.hooks[index]
-		local current = ffi.cast("uint32_t*", hook.slot)[0]
-		if current ~= hook.stub then
-			hook.original = current
-			if not write_slot(hook.slot, hook.stub) then log("VirtualProtect failed for " .. ffi.string(hook.name)) end
-		end
+		enable_hook(block.hooks[index])
 	end
 end
 
@@ -59,10 +72,10 @@ end
 local function disable_hooks(block)
 	for index = 0, block.control.hook_count - 1 do
 		local hook = block.hooks[index]
-		if ffi.cast("uint32_t*", hook.slot)[0] == hook.stub then
-			write_slot(hook.slot, hook.original)
-		else
+		if ffi.cast("uint32_t*", hook.slot)[0] ~= hook.stub then
 			log("left in place, another mod hooked over it: " .. ffi.string(hook.name))
+		elseif write_slot(hook.slot, hook.original) then
+			hook.in_chain = 0
 		end
 	end
 end
@@ -121,7 +134,7 @@ local function fill_hook_entries(block, hooks)
 		local entry = block.hooks[index - 1]
 		entry.slot, entry.stub, entry.id = hook.slot, hook.stub, hook.id
 		entry.original = ffi.cast("uint32_t*", hook.slot)[0]
-		ffi.copy(entry.name, hook.name:sub(1, 47))
+		ffi.copy(entry.name, hook.name:sub(1, 43))
 	end
 end
 
