@@ -261,7 +261,8 @@ local function load_material_owners()
 	for _, file in ipairs(ModMaterialFilesGet() or {}) do
 		local succeeded, content = pcall(ModTextFileGetContent, file)
 		if succeeded and content then
-			local owner = file:match("^mods/([^/]+)/") or "vanilla"
+			-- Not file_owner: a mod patching data/materials.xml did not define every material in it.
+			local owner = file:match("^mods/([^/]+)/") or census.data_file_shipper(file) or "vanilla"
 			for tag in content:gmatch("<CellData[^>]*>") do
 				local name = tag:match('%sname%s*=%s*"([^"]+)"')
 				if name then owners[name] = owner end

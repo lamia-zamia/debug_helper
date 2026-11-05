@@ -30,22 +30,48 @@ local latest_pass = nil
 local idle_ticks = PAUSE_TICKS
 local owner_by_file = {}
 
----Which mod an entity file belongs to: its own path, or the mod that last patched a vanilla file
+---The mod whose copy of a data/ file the game uses. Mods/x/data/y and data/y are one file, and each mod in load order
+---overwrites the data/y redirect, so the last mod shipping it wins
+---@param file string
+---@return string? mod_id nil when no mod ships it
+function census.data_file_shipper(file)
+	if not ModGetActiveModIDs or not ModDoesFileExist then return nil end
+	local mod_ids = ModGetActiveModIDs()
+	for index = #mod_ids, 1, -1 do
+		if ModDoesFileExist("mods/" .. mod_ids[index] .. "/" .. file) then return mod_ids[index] end
+	end
+	return nil
+end
+
+---Which mod a file belongs to: its own path, else who last replaced its content, since that beats a shipped copy,
+---else who ships it. Takes a script's chunk name too, with its @ and :line
 ---@param file string
 ---@return string
 function census.file_owner(file)
 	local owner = owner_by_file[file]
 	if owner then return owner end
-	owner = file:match("^mods/([^/]+)/")
+	local path = file:match("^@?(.-):%d+$") or file:match("^@?(.*)$")
+	owner = path:match("^mods/([^/]+)/")
 	if not owner then
-		if file == "" then
+		if path == "" then
 			owner = "created at runtime"
 		else
-			local patched_by = ModTextFileWhoSetContent and ModTextFileWhoSetContent(file)
-			owner = patched_by and patched_by ~= "" and patched_by or "vanilla"
+			local patched_by = ModTextFileWhoSetContent and ModTextFileWhoSetContent(path)
+			owner = patched_by and patched_by ~= "" and patched_by or census.data_file_shipper(path) or "vanilla"
 		end
 	end
 	owner_by_file[file] = owner
+	return owner
+end
+
+---Who a script's time belongs to
+---@param path string a chunk name, with or without its :line
+---@return string? owner nil when this is not a file under mods/ or data/
+function census.script_owner(path)
+	if not path:find("^@?mods/") and not path:find("^@?data/") then return nil end
+	local owner = census.file_owner(path)
+	if owner == "debug_helper" then return "this profiler" end
+	if owner == "vanilla" then return "vanilla scripts" end
 	return owner
 end
 

@@ -3,6 +3,7 @@
 
 local sessions = dofile_once("mods/debug_helper/files/scripts/profiler/capture/session.lua") ---@type profiler_sessions_module
 local queries = dofile_once("mods/debug_helper/files/scripts/profiler/capture/queries.lua") ---@type profiler_queries_module
+local census = dofile_once("mods/debug_helper/files/scripts/profiler/capture/census.lua") ---@type profiler_census_module
 local WINDOW_SETTING = "debug_helper.profiler_overlay"
 local OVERLAY_SETTING = "debug_helper.profiler_hud"
 local LUA_FUNCTIONS_SETTING = "debug_helper.PROFILER_LUA_FUNCTIONS"
@@ -223,10 +224,8 @@ function view.describe_item(key)
 	local path = key:match("^compile: (.*)$")
 	local kind = path and "compile" or "lua"
 	path = path or key
-	local mod = path:match("^@?mods/([^/]+)/")
-	if mod == "debug_helper" then return "this profiler", kind end
-	if mod then return mod, kind end
-	if path:find("^@?data/") then return "vanilla scripts", kind end
+	local owner = census.script_owner(path)
+	if owner then return owner, kind end
 	if key == "(lua state setup)" then return "new Lua states", "lua state setup" end
 	if key == sessions.NOT_HOOKED_ITEM then return "engine", "other" end
 	if key:find("^update: ") or key == "draw" or key:find("^swap: ") then return "engine", "phase" end

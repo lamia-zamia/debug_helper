@@ -1,5 +1,6 @@
 local hook_block = dofile_once("mods/debug_helper/files/scripts/profiler/native/hook_block.lua") ---@type profiler_hook_block_module
 local sessions = dofile_once("mods/debug_helper/files/scripts/profiler/capture/session.lua") ---@type profiler_sessions_module
+local census = dofile_once("mods/debug_helper/files/scripts/profiler/capture/census.lua") ---@type profiler_census_module
 local ITEM_HISTORY = 1800 -- frames that keep their full per-item breakdown
 local SPIKE_MS = 33.3
 local SPIKE_SKIP_FRAMES = 60
@@ -11,6 +12,16 @@ local TRACE_CONTEXT_FRAMES = 60
 ---@class profiler_frame_history_module
 local frame_history = {}
 
+---Who a breakdown item that is not a script belongs to
+---@param key string
+---@return string
+local function engine_owner_of(key)
+	if key == "(lua state setup)" then return "new Lua states" end
+	if key:find("^update: ") then return "world simulation" end
+	if key == "draw" or key:find("^swap: ") then return "rendering" end
+	return "engine systems"
+end
+
 ---Who a breakdown item belongs to. A mod's many small scripts have to add up, or they never compare with the
 ---engine's few large phases
 ---@param session profiler_session
@@ -19,23 +30,7 @@ local frame_history = {}
 local function owner_of(session, key)
 	local owner = session.owner_by_item[key]
 	if owner then return owner end
-	local path = key:match("^compile: (.*)$") or key
-	owner = path:match("^@?mods/([^/]+)/")
-	if owner == "debug_helper" then
-		owner = "this profiler"
-	elseif not owner then
-		if path:find("^@?data/") then
-			owner = "vanilla scripts"
-		elseif key == "(lua state setup)" then
-			owner = "new Lua states"
-		elseif key:find("^update: ") then
-			owner = "world simulation"
-		elseif key == "draw" or key:find("^swap: ") then
-			owner = "rendering"
-		else
-			owner = "engine systems"
-		end
-	end
+	owner = census.script_owner(key:match("^compile: (.*)$") or key) or engine_owner_of(key)
 	session.owner_by_item[key] = owner
 	return owner
 end

@@ -50,8 +50,8 @@ end
 local function mod_groups(session)
 	local groups = {}
 	for path, stat in pairs(session.script_stats) do
-		local name = path:match("^@?mods/([^/]+)/") or (path:match("^@?data/") and "(vanilla data/)") or "(other)"
-		if name == "debug_helper" then name = "(this profiler, not a mod's cost)" end
+		local name = census.script_owner(path) or "(other)"
+		if name == "this profiler" then name = "(this profiler, not a mod's cost)" end
 		local group = groups[name] or { calls = 0, self_ticks = 0, total_ticks = 0, worst_ticks = 0 }
 		groups[name] = group
 		group.calls, group.self_ticks = group.calls + stat.calls, group.self_ticks + stat.self_ticks
