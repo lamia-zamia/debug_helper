@@ -156,7 +156,11 @@ local function write_header(session, frames)
 		to_ms(session.own_ticks_worst)
 	)
 	line("game: entities %d  memory %.0f MB", session.entity_count, session.memory_mb)
-	line("lua functions: %d frames hit the call limit", session.frames_over_call_limit)
+	line(
+		"lua function timing: %s now, %d frames hit the call limit",
+		session.block.control.function_hooks_enabled ~= 0 and "on, JIT off, Lua times inflated," or "off",
+		session.frames_over_call_limit
+	)
 	line("entity sampler: %s, %d samples, %d lost", queries.sampler_active(session) and "on" or "off", session.samples_read, session.samples_lost)
 end
 

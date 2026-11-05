@@ -10,16 +10,25 @@ local census = dofile_once("mods/debug_helper/files/scripts/profiler/capture/cen
 local file_export = dofile_once("mods/debug_helper/files/scripts/profiler/output/file_export.lua") ---@type profiler_file_export_module
 local report = dofile_once("mods/debug_helper/files/scripts/profiler/output/report.lua") ---@type profiler_report_module
 local REPORT_EVERY_TICKS = 600
+local LUA_FUNCTIONS_SETTING = "debug_helper.PROFILER_LUA_FUNCTIONS"
 
 ---@class profiler
 ---@field session profiler_session? nil while the profiler is off
 local profiler = {}
 
+---Passes the setting to the hooks
+---@param control profiler_control_block
+local function apply_lua_functions_setting(control)
+	control.function_hooks_enabled = ModSettingGet(LUA_FUNCTIONS_SETTING) == true and 1 or 0
+end
+
 ---Applies the mod setting: installs, attaches to hooks an old Lua state left, or removes them
 ---@param enabled boolean
 function profiler.start(enabled)
 	local block = hook_installer.start(enabled)
-	if block then profiler.session = sessions.new(block) end
+	if not block then return end
+	apply_lua_functions_setting(block.control)
+	profiler.session = sessions.new(block)
 end
 
 ---The session, once it is calibrated and has readable times
@@ -37,6 +46,7 @@ local function sync_control_block(running)
 	local control = running.block.control
 	control.main_thread_id = running.main_thread_id
 	control.reader_lua_state = control.last_lua_state
+	apply_lua_functions_setting(control)
 	if control.function_calls >= control.function_call_limit and control.function_call_limit > 0 then
 		running.frames_over_call_limit = running.frames_over_call_limit + 1
 	end

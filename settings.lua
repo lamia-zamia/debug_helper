@@ -10,6 +10,13 @@ mod_settings = {
 		value_default = false,
 		scope = MOD_SETTING_SCOPE_RUNTIME_RESTART,
 	},
+	{
+		id = "PROFILER_LUA_FUNCTIONS",
+		ui_name = "Time every Lua function (disables JIT)",
+		ui_description = "Times each Lua function, not only each callback the game runs. Applies right away.\nLua runs without the JIT while this is on, and every call pays for being recorded,\nso Lua timings are inflated, most of all for code making many small calls.",
+		value_default = false,
+		scope = MOD_SETTING_SCOPE_RUNTIME,
+	},
 }
 
 ---Makes the values visible to ModSettingGet. Settings don't work without this

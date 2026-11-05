@@ -5,6 +5,7 @@ local sessions = dofile_once("mods/debug_helper/files/scripts/profiler/capture/s
 local queries = dofile_once("mods/debug_helper/files/scripts/profiler/capture/queries.lua") ---@type profiler_queries_module
 local WINDOW_SETTING = "debug_helper.profiler_overlay"
 local OVERLAY_SETTING = "debug_helper.profiler_hud"
+local LUA_FUNCTIONS_SETTING = "debug_helper.PROFILER_LUA_FUNCTIONS"
 
 ---@class profiler_span
 ---@field label string
@@ -91,6 +92,19 @@ end
 ---Shows or hides the overlay
 function view:toggle_overlay()
 	ModSettingSet(OVERLAY_SETTING, not self:is_overlay_open())
+end
+
+---Whether each Lua function is timed
+---@return boolean
+function view:is_timing_lua_functions()
+	return ModSettingGet(LUA_FUNCTIONS_SETTING) == true
+end
+
+---Turns timing of each Lua function on or off. Closing the settings menu copies the next value over the current one
+---@param enabled boolean
+function view:set_timing_lua_functions(enabled)
+	ModSettingSet(LUA_FUNCTIONS_SETTING, enabled)
+	ModSettingSetNextValue(LUA_FUNCTIONS_SETTING, enabled, false)
 end
 
 ---Hides the overlay, for when drawing it fails

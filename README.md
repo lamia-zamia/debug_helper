@@ -38,13 +38,15 @@ Two entries then appear under `View` > `Debug Helper`:
 The window's tabs:
 
 - `What's lagging`: everything using the frame, largest first. Start here.
-- `Mods`: each mod's own Lua and compile time, down to individual functions.
+- `Mods`: each mod's own Lua and compile time, down to individual functions when those are timed.
 - `Spikes`: frames over 33.3 ms of work, worst first, with what took the most time in each.
 - `Entities`: engine time per entity file.
 - `Components`: every component type in the world, with counts and which mods' files they came from.
 - `All items`: one sortable list of everything, with filters.
 
 `Span` sets the time range of the graph and every tab, from 5 seconds to the whole session. `Freeze` stops them at one moment.
+
+`Time every Lua function (disables JIT)` is in the window and the mod settings, off by default. It splits each mod's Lua into individual functions, but Lua runs without the JIT while it is on, so Lua timings are inflated, most of all for code making many small calls.
 
 ### Output files
 

@@ -8,6 +8,10 @@ local graph = dofile_once("mods/debug_helper/files/scripts/profiler/viewer/graph
 local overview_tab = dofile_once("mods/debug_helper/files/scripts/profiler/viewer/overview_tab.lua") ---@type profiler_overview_tab_module
 local detail_tabs = dofile_once("mods/debug_helper/files/scripts/profiler/viewer/detail_tabs.lua") ---@type profiler_detail_tabs_module
 local overlay = dofile_once("mods/debug_helper/files/scripts/profiler/viewer/overlay.lua") ---@type profiler_overlay_module
+local LUA_FUNCTIONS_TOOLTIP = "Times each Lua function, not only each callback the game runs.\n"
+	.. "Lua runs without the JIT while this is on, and every call pays for being recorded.\n"
+	.. "Lua timings are inflated, most of all for code making many small calls: compare those by calls, not ms.\n"
+	.. "Whole-session totals mix whatever was on, so use a Span that starts after changing this."
 ---@class profiler_viewer_module
 local viewer = {}
 
@@ -43,6 +47,14 @@ local function draw_tabs(session)
 	imgui.EndTabBar()
 end
 
+---The checkbox that trades accurate Lua times for a breakdown by function
+local function draw_lua_functions_toggle()
+	local imgui = view.imgui
+	local changed, enabled = imgui.Checkbox("Time every Lua function (disables JIT)", view:is_timing_lua_functions())
+	if changed then view:set_timing_lua_functions(enabled) end
+	if imgui.IsItemHovered() then imgui.SetTooltip(LUA_FUNCTIONS_TOOLTIP) end
+end
+
 ---The row of buttons under the header
 ---@param session profiler_session
 local function draw_controls(session)
@@ -71,6 +83,7 @@ local function draw_controls(session)
 	if imgui.Button("Save CSV") then file_export.start_csv(session) end
 	imgui.SameLine()
 	imgui.TextDisabled(file_export.status())
+	draw_lua_functions_toggle()
 end
 
 ---The summary line

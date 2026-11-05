@@ -149,7 +149,7 @@ local function enable_function_hooks(control, lua_library)
 		control.lua_gethook = win32.address_of(lua_gethook)
 		control.lua_sethook = win32.address_of(lua_sethook)
 		control.jit_setmode = win32.address_of(jit_setmode)
-		control.function_hooks_available, control.function_hooks_enabled = 1, 1
+		control.function_hooks_available = 1
 	else
 		log("Lua hook exports not found, so Lua is timed per callback only")
 	end
@@ -262,7 +262,6 @@ local function attach(address, enabled)
 	end
 	enable_hooks(block)
 	if control.updated_entity_global ~= 0 then control.sampler_enabled = 1 end
-	if control.lua_sethook ~= 0 then control.function_hooks_enabled = 1 end
 	log("attached to existing hooks")
 	return block
 end

@@ -69,7 +69,7 @@ typedef struct {
 ---@field updated_entity_global integer
 ---@field sleep_function integer
 ---@field function_hooks_available integer checked first by lua_pcall's stub, normal play skips the state gate on it
----@field function_hooks_enabled integer
+---@field function_hooks_enabled integer the setting, which each state's next lua_pcall applies to that state
 ---@field function_calls integer this frame's count
 ---@field function_call_limit integer
 ---@field last_lua_state integer
